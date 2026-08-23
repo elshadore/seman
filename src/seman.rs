@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use log::info;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -98,6 +99,9 @@ impl Seman {
         if start {
             service.start().await?;
         }
+        
+        info!("service: {}, defined!", name);
+        
         if let Some(mut result) = self.services.insert(name, service) {
             result.kill().await;
         }
@@ -107,6 +111,7 @@ impl Seman {
     pub async fn service_start(&mut self, name: String) -> Result<()> {
         if let Some(result) = self.services.get_mut(&name) {
             result.start().await?;
+            info!("service: {}, started successfully!", name);
             Ok(())
         } else {
             bail!("service: {name}, does not exist, and so cannot be started!")
@@ -116,6 +121,7 @@ impl Seman {
     pub async fn service_stop(&mut self, name: String) -> Result<()> {
         if let Some(result) = self.services.get_mut(&name) {
             result.kill().await;
+            info!("service: {}, killed successfully!", name);
             Ok(())
         } else {
             bail!("service: {name}, does not exist, and so cannot be stopped!")
@@ -134,23 +140,36 @@ impl Seman {
 
     pub fn timer_add(&mut self, name: String, duration: Duration, cmd: Option<String>) {
         let cmd1 = cmd.clone();
+        let name1 = name.clone();
         let handle = tokio::spawn(async move {
             tokio::time::sleep(duration).await;
+            let name = name1;
             if let Some(cmd) = cmd1 {
+                info!("timer: {name}, finished, executing command: {cmd}");
                 let _ = TokioCommand::new("sh").args(["-c", &cmd]).output().await;
+            } else {
+                info!("timer: {name}, finished! no command to execute!");
             }
         });
+        if let Some(ref cmd) = cmd {
+            info!("timer: {name}, added with command: {cmd}");
+        } else {
+            info!("timer: {name}, added with no command!");
+        }
         self.timers.push(Timer::new(name, cmd, duration, handle));
         self.timer_sync();
     }
 
     pub fn timer_kill(&mut self, name: impl AsRef<str>) {
         let name = name.as_ref();
+        let mut count: usize = 0;
         for t in self.timers.iter_mut() {
             if t.name == name {
                 t.handle.abort();
+                count += 1;
             }
         }
+        info!("timers with name: {}, killed! count: {}", name, count);
         self.timer_sync();
     }
 

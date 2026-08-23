@@ -4,7 +4,7 @@ use super::seman::SemanState;
 use crate::seman::Seman;
 use anyhow::{Context, Result};
 use itertools::Itertools;
-use log::{debug, info, warn};
+use log::{info, warn};
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Instant;
@@ -42,6 +42,7 @@ async fn respond_to_client(buf: &mut TokioTcpStream, resp: Response) {
 
 pub async fn execute(state: SemanState, cmd: Command) -> Response {
     let mut seman = state.lock().await;
+    
     seman.sync();
 
     match cmd {
@@ -201,10 +202,10 @@ async fn handle_connection(mut stream: TokioTcpStream, state: SemanState) {
     }
 
     let string = line.trim();
-    debug!("input-from-client: {string}");
+    info!("input from client: {string}");
     match serde_json::from_str(string) {
         Ok(cmd) => {
-            debug!("command-parsed: {cmd:?}");
+            info!("command parsed: {cmd:?}");
             handle_command(state, buf.get_mut(), cmd).await;
         }
         Err(err) => {
@@ -241,6 +242,7 @@ fn init_logger() -> Result<()> {
     use simplelog::*;
     use time::format_description::FormatItem;
     use time::format_description::parse_borrowed;
+    // Clanker code holy shit...
     let fmt: Vec<FormatItem<'static>> =
         parse_borrowed::<2>("[year]-[month]-[day] [hour]:[minute]:[second]")
             .context("invalid log time format")?;
@@ -249,11 +251,7 @@ fn init_logger() -> Result<()> {
     builder.set_time_format_custom(fmt);
     let _ = builder.set_time_offset_to_local();
     let config = builder.build();
-    let level = std::env::var("SEMAN_LOG_LEVEL")
-        .ok()
-        .and_then(|s| s.parse::<LevelFilter>().ok())
-        .unwrap_or(LevelFilter::Info);
-    SimpleLogger::init(level, config).context("failed to initialize logger")?;
+    SimpleLogger::init(LevelFilter::max(), config).context("failed to initialize logger")?;
     Ok(())
 }
 
