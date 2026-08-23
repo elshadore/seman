@@ -4,52 +4,59 @@ use super::seman::SemanState;
 use anyhow::Result;
 use anyhow::bail;
 use clap::Parser;
-use log::{debug, info};
+use log::{debug, info, warn};
+use std::fs::File;
+use std::io::Read;
 
-fn resolve_config_paths() -> Vec<String> {
+fn resolve_config_file() -> Option<File> {
+    let mut candidates: Vec<String> = Vec::new();
     if let Ok(p) = std::env::var("SEMANRC") {
         if !p.is_empty() {
-            return vec![p];
+            candidates.push(p);
+        }
+    } else {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            if !xdg.is_empty() {
+                candidates.push(format!("{xdg}/.semanrc"));
+                candidates.push(format!("{xdg}/seman/.semanrc"));
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.is_empty() {
+                candidates.push(format!("{home}/.semanrc"));
+                candidates.push(format!("{home}/seman/.semanrc"));
+            }
         }
     }
 
-    let mut paths = Vec::new();
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            paths.push(format!("{xdg}/.semanrc"));
-            paths.push(format!("{xdg}/seman/.semanrc"));
+    for path in candidates {
+        match File::open(&path) {
+            Ok(file) => {
+                info!("config found at {path}");
+                return Some(file);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                info!("config not found at {path}");
+            }
+            Err(e) => {
+                warn!("config at {path} present but unreadable: {e}");
+            }
         }
     }
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            paths.push(format!("{home}/.semanrc"));
-            paths.push(format!("{home}/seman/.semanrc"));
-        }
-    }
-    paths
+    None
 }
 
 pub async fn run_init_file(state: SemanState) -> Result<()> {
-    let path = match resolve_config_paths()
-        .into_iter()
-        .find(|p| std::path::Path::new(p).exists())
-    {
-        Some(p) => p,
-        None => {
-            info!("no init file found, skipping");
-            return Ok(());
-        }
+    let mut file = match resolve_config_file() {
+        Some(f) => f,
+        None => return Ok(()),
     };
 
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            info!("no init file at {path}, skipping");
-            return Ok(());
-        }
-    };
-
-    info!("loading init file: {path}");
+    let mut text = String::new();
+    if file.read_to_string(&mut text).is_err() {
+        warn!("failed to read init file, skipping");
+        return Ok(());
+    }
 
     for raw in text.lines() {
         let line = raw.trim();
