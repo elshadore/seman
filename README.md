@@ -73,7 +73,7 @@ Below is a listing of all SEMAN commands.
     Pong.
 
 ## Config File: `.semanrc`
-When initially starting the `seman server-start`, the `.semanrc` config file will be ran. This is interpretted as a list of SEMAN commands. Server commands cannot be used this mode *obviously*. SEMAN will attempt to find this file in the following locations.
+When initially starting the `seman server-start`, the `.semanrc` config file will be ran. This is interpretted as a list of SEMAN commands. Server commands cannot be used this mode *obviously*. SEMAN will attempt to find the config file in the following locations.
 
 ```sh
 ## SEMAN_CONFIG env variable
