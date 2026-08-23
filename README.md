@@ -9,6 +9,7 @@ SEMAN allows you to define, start, restart and kill these processes to make simp
 
 Here is an example of the shell interface.
 ```sh
+seman defservice-start dunst dunst
 seman timer foo 10min "echo \"henlo word!\""
 seman timer-list
 ```
@@ -16,58 +17,58 @@ seman timer-list
 ## SEMAN Commands
 Below is a listing of all SEMAN commands.
 
-### `server-start`
-Starts the SEMAN server. *WARNING* like all linux socket/TCP stuff you can kill the server and start it only to find the only process is still bound to the port.
+- `server-start`
+    Starts the SEMAN server. *WARNING* like all linux socket/TCP stuff you can kill the server and start it only to find the old process is still bound to the port.
 
-### `server-kill`
-Kills the current SEMAN server. The same warning as in `server-start` also applies here.
+- `server-kill`
+    Kills the current SEMAN server. The same warning as in `server-start` also applies here.
 
-### `server-status`
-Returns `server: ok!` if the server is active, returns `server: not found` if not server is found.
+- `server-status`
+    Returns `server: ok!` if the server is active, returns `server: not found` if not server is found.
 
-### `defservice`
-Define a simple service. Service names are unique, defining a service with the same name will overwrite the previous service.
-- Argument 1: service name
-- Argument 2: service command
+- `defservice`
+    Define a simple service. Service names are unique, defining a service with the same name will overwrite and *kill* the previous service.
+    - Argument 1: service name
+    - Argument 2: service command
 
-### `service-start`
-Start/restart a named service.
-- Argument 1: service name.
+- `service-start`
+    Start/restart a named service.
+    - Argument 1: service name.
 
-### `service-stop`
-Stops a service killing the process.
+- `service-stop`
+    Stops a service killing the process.
 
-### `defservice-start`
-Combines `defservice` and `service-start`.
-- Argument 1: service name
-- Argument 2: service command
+- `defservice-start`
+    Combines `defservice` and `service-start`.
+    - Argument 1: service name
+    - Argument 2: service command
 
-### `service-list` || `services`
-- Argument Flag (optional): --json
-Provides a listing of all services, and wether they are active or not.
+- `service-list` || `services`
+    Provides a listing of all services, and wether they are active or not.
+    - Argument Flag (optional): --json
 
-### `timer`
-Creates a named timer. Timers can have the same name and will not override each other unlike services.
-- Argument 1: timer name
-- Argument 2: time
-- Argument 3 (optional): command ran on completion 
+- `timer`
+    Creates a named timer. Timers can have the same name and will not override each other unlike services.
+    - Argument 1: timer name
+    - Argument 2: time
+    - Argument 3 (optional): command ran on completion 
 
-### `timer-list` || `timers`
-- Argument Flag (optional): --json
-Returns a list of all currently active timers.
+- `timer-list` || `timers`
+    Returns a list of all currently active timers.
+    - Argument Flag (optional): --json
 
-### `timer-kill`
-Kills a timer(s) by name. If there are timers with the same name it kills them all.
-- Argument 1: timer name
+- `timer-kill`
+    Kills a timer(s) by name. If there are timers with the same name it kills them all.
+    - Argument 1: timer name
 
-### `exec`
-Executes a shell script. This will not block. So this will not return the scripts exitcode or stdout.
+- `exec`
+    Executes a shell script. This will not block. So this will not return the scripts exitcode or stdout.
 
-### `ping`
-Pong.
+- `ping`
+    Pong.
 
-## .semanrc
-When initially starting the `seman server-start`, the `.semanrc` config file will be ran. This is interpretted as a list of SEMAN commands. SEMAN will attempt to find this file in the following locations.
+## Config File: `.semanrc`
+When initially starting the `seman server-start`, the `.semanrc` config file will be ran. This is interpretted as a list of SEMAN commands. SEMAN will attempt to find this file in the following locations. Server commands cannot be used this mode *obviously*.
 
 ```sh
 ## SEMANRC env variable
