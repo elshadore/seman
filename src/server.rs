@@ -2,11 +2,11 @@ use super::Command;
 use super::Response;
 use super::seman::SemanState;
 use crate::seman::Seman;
-use log::{debug, info, warn};
-use serde::Serialize;
 use anyhow::{Context, Result};
 use daemonize::Daemonize;
 use itertools::Itertools;
+use log::{debug, info, warn};
+use serde::Serialize;
 use std::fs::File;
 use std::sync::Arc;
 use std::time::Instant;
@@ -14,30 +14,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream as TokioUnixStream;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
-
-async fn respond(buf: &mut TokioUnixStream, resp: Response) {
-    let mut s = match serde_json::to_string(&resp) {
-        Ok(s) => s,
-        Err(_) => "{\"Error\":\"failed to serialize response\"}".to_string(),
-    };
-    s.push('\n');
-    let _ = buf.write_all(s.as_bytes()).await;
-    if let Response::Error(msg) = &resp {
-        warn!("response error: {msg}");
-    }
-}
-
-macro_rules! respond_ok {
-    ($buf:expr, $($arg:tt)*) => {
-        respond($buf, Response::OkMsg(format!($($arg)*)))
-    };
-}
-
-macro_rules! respond_err {
-    ($buf:expr, $($arg:tt)*) => {
-        respond($buf, Response::Error(format!($($arg)*)))
-    };
-}
 
 #[derive(Serialize)]
 struct ServiceInfo {
@@ -53,64 +29,50 @@ struct TimerInfo {
     remaining_seconds: f64,
 }
 
-async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Command) {
-    let mut seman = state.lock().await;
+async fn respond_to_client(buf: &mut TokioUnixStream, resp: Response) {
+    let mut s = match serde_json::to_string(&resp) {
+        Ok(s) => s,
+        Err(_) => "{\"Error\":\"failed to serialize response\"}".to_string(),
+    };
+    s.push('\n');
+    let _ = buf.write_all(s.as_bytes()).await;
+    if let Response::Error(msg) = &resp {
+        warn!("response error: {msg}");
+    }
+}
 
+pub async fn execute(state: SemanState, cmd: Command) -> Response {
+    let mut seman = state.lock().await;
     seman.sync();
 
     match cmd {
-        Command::ServerStart => {
-            respond_err!(buf, "unknown command").await;
-        }
-        Command::Ping => {
-            respond_ok!(buf, "pong").await;
-        }
-        Command::ServerKill => {
-            let _ = std::fs::remove_file("/tmp/seman.sock");
-            respond(buf, Response::Ok).await;
-            std::process::exit(0);
-        }
+        Command::ServerStart => Response::Error("server already running".into()),
+        Command::ServerKill => Response::Ok,
+        Command::Ping => Response::OkMsg("pong".into()),
+        Command::ServerStatus => Response::OkMsg("server: ok!".into()),
         Command::Exec { cmd } => match TokioCommand::new("sh").args(["-c", &cmd]).spawn() {
-            Ok(proc) => {
-                let id = proc.id().unwrap_or(0);
-                respond_ok!(buf, "{}", id).await;
-            }
-            Err(err) => {
-                respond_err!(
-                    buf,
-                    "failed to spawn the command: {cmd}, in command exec, err: {err}"
-                )
-                .await;
-            }
+            Ok(proc) => Response::OkMsg(format!("{}", proc.id().unwrap_or(0))),
+            Err(err) => Response::Error(format!(
+                "failed to spawn the command: {cmd}, in command exec, err: {err}"
+            )),
         },
-        Command::DefServiceStart { name, cmd } => {
-            if let Err(err) = seman.service_define(name, cmd, true).await {
-                respond_err!(buf, "errors during defservice-start: {err}").await;
-            } else {
-                respond(buf, Response::Ok).await;
-            }
-        }
-        Command::DefService { name, cmd } => {
-            if let Err(err) = seman.service_define(name, cmd, false).await {
-                respond_err!(buf, "errors during defservice: {err}").await;
-            } else {
-                respond(buf, Response::Ok).await;
-            }
-        }
-        Command::ServiceStart { name } => {
-            if let Err(err) = seman.service_start(name).await {
-                respond_err!(buf, "errors during service-start: {err}").await;
-            } else {
-                respond(buf, Response::Ok).await;
-            }
-        }
-        Command::ServiceStop { name } => {
-            if let Err(err) = seman.service_stop(name).await {
-                respond_err!(buf, "errors during service-stop: {err}").await;
-            } else {
-                respond(buf, Response::Ok).await;
-            }
-        }
+        Command::DefServiceStart { name, cmd } => match seman.service_define(name, cmd, true).await
+        {
+            Ok(()) => Response::Ok,
+            Err(err) => Response::Error(format!("errors during defservice-start: {err}")),
+        },
+        Command::DefService { name, cmd } => match seman.service_define(name, cmd, false).await {
+            Ok(()) => Response::Ok,
+            Err(err) => Response::Error(format!("errors during defservice: {err}")),
+        },
+        Command::ServiceStart { name } => match seman.service_start(name).await {
+            Ok(()) => Response::Ok,
+            Err(err) => Response::Error(format!("errors during service-start: {err}")),
+        },
+        Command::ServiceStop { name } => match seman.service_stop(name).await {
+            Ok(()) => Response::Ok,
+            Err(err) => Response::Error(format!("errors during service-stop: {err}")),
+        },
         Command::ServiceList { json } => {
             if json {
                 let infos: Vec<ServiceInfo> = seman
@@ -123,8 +85,8 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
                     })
                     .collect();
                 match serde_json::to_string(&infos) {
-                    Ok(s) => respond_ok!(buf, "{}", s).await,
-                    Err(e) => respond_err!(buf, "failed to serialize service list: {e}").await,
+                    Ok(s) => Response::OkMsg(s),
+                    Err(e) => Response::Error(format!("failed to serialize service list: {e}")),
                 }
             } else {
                 let mut result = String::new();
@@ -146,24 +108,19 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
                         .as_str(),
                     );
                 }
-                respond_ok!(buf, "{}", result).await;
+                Response::OkMsg(result)
             }
-        }
-        Command::ServerStatus => {
-            respond_ok!(buf, "server: ok!").await;
         }
         Command::Timer { name, time, cmd } => match humantime::parse_duration(&time) {
             Ok(duration) => {
                 seman.timer_add(name, duration, cmd);
-                respond(buf, Response::Ok).await;
+                Response::Ok
             }
-            Err(err) => {
-                respond_err!(buf, "invalid time format: {err}").await;
-            }
+            Err(err) => Response::Error(format!("invalid time format: {err}")),
         },
         Command::TimerKill { name } => {
             seman.timer_kill(name);
-            respond(buf, Response::Ok).await;
+            Response::Ok
         }
         Command::TimerList { json } => {
             let now = Instant::now();
@@ -182,8 +139,8 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
                     })
                     .collect();
                 match serde_json::to_string(&infos) {
-                    Ok(s) => respond_ok!(buf, "{}", s).await,
-                    Err(e) => respond_err!(buf, "failed to serialize timer list: {e}").await,
+                    Ok(s) => Response::OkMsg(s),
+                    Err(e) => Response::Error(format!("failed to serialize timer list: {e}")),
                 }
             } else {
                 let mut result = String::new();
@@ -207,9 +164,19 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
                         .as_str(),
                     );
                 }
-                respond_ok!(buf, "{}", result).await;
+                Response::OkMsg(result)
             }
         }
+    }
+}
+
+async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Command) {
+    let is_kill = matches!(cmd, Command::ServerKill);
+    let response = execute(state, cmd).await;
+    respond_to_client(buf, response).await;
+    if is_kill {
+        let _ = std::fs::remove_file(super::SOCKET);
+        std::process::exit(0);
     }
 }
 
@@ -226,7 +193,11 @@ async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) {
             }
         }
         Err(err) => {
-            respond_err!(buf.get_mut(), "malform line read: {err}").await;
+            respond_to_client(
+                buf.get_mut(),
+                Response::Error(format!("malform line read: {err}")),
+            )
+            .await;
             return;
         }
     }
@@ -239,20 +210,21 @@ async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) {
             handle_command(state, buf.get_mut(), cmd).await;
         }
         Err(err) => {
-            respond_err!(
+            respond_to_client(
                 buf.get_mut(),
-                "malformed message sent to the server: {string}, err: {err}"
+                Response::Error(format!(
+                    "malformed message sent to the server: {string}, err: {err}"
+                )),
             )
             .await
         }
     }
 }
 
-async fn server_loop() -> Result<()> {
+async fn server_loop(state: SemanState) -> Result<()> {
     let _ = std::fs::remove_file(super::SOCKET);
     let listener =
         tokio::net::UnixListener::bind(super::SOCKET).context("failed to bind to unix socked")?;
-    let state = Arc::new(Mutex::new(Seman::new()));
     loop {
         let (stream, _) = listener.accept().await.context("socket listening failed")?;
         let state = state.clone();
@@ -262,14 +234,14 @@ async fn server_loop() -> Result<()> {
 
 fn init_logger() -> Result<()> {
     use simplelog::*;
+    use time::format_description::FormatItem;
     use time::format_description::parse_borrowed;
     let log_path = "/tmp/seman.log";
     let file = File::create(log_path).context("failed to open log file: {log_path}")?;
-    let fmt: Vec<time::format_description::FormatItem<'static>> =
+    let fmt: Vec<FormatItem<'static>> =
         parse_borrowed::<2>("[year]-[month]-[day] [hour]:[minute]:[second]")
             .context("invalid log time format")?;
-    let fmt: &'static [time::format_description::FormatItem<'static>] =
-        Box::leak(fmt.into_boxed_slice());
+    let fmt: &'static [FormatItem<'static>] = Box::leak(fmt.into_boxed_slice());
     let mut builder = ConfigBuilder::new();
     builder.set_time_format_custom(fmt);
     let _ = builder.set_time_offset_to_local();
@@ -297,14 +269,18 @@ pub fn start_daemon() -> Result<()> {
         .context("failed to start server daemon")?;
 
     init_logger()?;
-    
+
     info!("server started");
 
+    let state = Arc::new(Mutex::new(Seman::new()));
     let result = tokio::runtime::Runtime::new()
         .context("failed to initialize tokio runtime")?
-        .block_on(server_loop());
-    
+        .block_on(async {
+            super::init::run_init_file(state.clone()).await?;
+            server_loop(state).await
+        });
+
     info!("server finished");
-    
+
     result
 }
