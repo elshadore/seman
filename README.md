@@ -78,10 +78,13 @@ When initially starting the `seman server-start`, the `.semanrc` config file wil
 $SEMANRC
 
 ## XDG HOME
-${XDG_CONFIG_HOME}/.config/seman/.semanrc
+${XDG_CONFIG_HOME}/.semanrc
+${XDG_CONFIG_HOME}/seman/.semanrc
 
 ## FALLBACK HOME
-${HOME}/.config/seman/.semanrc
+${HOME}/.semanrc
+${HOME}/seman/.semanrc
+
 ```
 
 An example config.
