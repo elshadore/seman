@@ -4,7 +4,7 @@ use super::seman::SemanState;
 use anyhow::Result;
 use anyhow::bail;
 use clap::Parser;
-use log::{debug, info, warn};
+use log::{info, warn};
 use std::fs::File;
 use std::io::Read;
 
@@ -12,6 +12,7 @@ fn resolve_config_file() -> Option<File> {
     let mut candidates: Vec<String> = Vec::new();
     if let Ok(p) = std::env::var("SEMANRC") {
         if !p.is_empty() {
+            info!("SEMANRC config environment variable read: {p}");
             candidates.push(p);
         }
     } else {
@@ -43,6 +44,7 @@ fn resolve_config_file() -> Option<File> {
             }
         }
     }
+    info!("no valid config found!");
     None
 }
 
@@ -85,7 +87,7 @@ pub async fn run_init_file(state: SemanState) -> Result<()> {
         }
         let resp = super::server::execute(state.clone(), cmd).await;
         match resp {
-            Response::Ok | Response::OkMsg(_) => debug!("init ok: {line}"),
+            Response::Ok | Response::OkMsg(_) => info!("init ok: {line}"),
             Response::Error(e) => bail!("init command failed: {line} -> {e}"),
         }
     }
