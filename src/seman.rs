@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use log::info;
 use std::collections::HashMap;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -28,6 +29,9 @@ impl Service {
         let proc = TokioCommand::new("sh")
             .args(["-c", &self.cmd])
             .kill_on_drop(true)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .spawn()?;
 
         self.kill().await;
@@ -169,7 +173,13 @@ impl Seman {
             let name = name1;
             if let Some(cmd) = cmd1 {
                 info!("timer: {name}, finished, executing command: {cmd}");
-                let _ = TokioCommand::new("sh").args(["-c", &cmd]).output().await;
+                let _ = TokioCommand::new("sh")
+                    .args(["-c", &cmd])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .output()
+                    .await;
             } else {
                 info!("timer: {name}, finished! no command to execute!");
             }

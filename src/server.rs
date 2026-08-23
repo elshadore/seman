@@ -7,6 +7,7 @@ use itertools::Itertools;
 use log::{info, warn};
 use serde::Serialize;
 use std::sync::Arc;
+use std::process::Stdio;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener as TokioTcpListener;
@@ -51,7 +52,13 @@ pub async fn execute(state: SemanState, cmd: Command) -> Response {
         Command::ServerKill => Response::Ok,
         Command::Ping => Response::OkMsg("pong".into()),
         Command::ServerStatus => Response::OkMsg("server: ok!".into()),
-        Command::Exec { cmd } => match TokioCommand::new("sh").args(["-c", &cmd]).spawn() {
+        Command::Exec { cmd } => match TokioCommand::new("sh")
+            .args(["-c", &cmd])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
             Ok(proc) => Response::OkMsg(format!("{}", proc.id().unwrap_or(0))),
             Err(err) => Response::Error(format!(
                 "failed to spawn the command: {cmd}, in command exec, err: {err}"
