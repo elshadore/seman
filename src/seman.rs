@@ -25,7 +25,10 @@ impl Service {
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        let proc = TokioCommand::new("sh").args(["-c", &self.cmd]).spawn()?;
+        let proc = TokioCommand::new("sh")
+            .args(["-c", &self.cmd])
+            .kill_on_drop(true)
+            .spawn()?;
 
         self.kill().await;
         self.proc = Some(proc);
@@ -142,6 +145,15 @@ impl Seman {
     pub fn service_sync(&mut self) {
         for (_, service) in self.services.iter_mut() {
             _ = service.is_active();
+        }
+    }
+
+    pub async fn kill_all_services(&mut self) {
+        let names: Vec<String> = self.services.keys().cloned().collect();
+        for name in names {
+            if let Some(service) = self.services.get_mut(&name) {
+                service.kill().await;
+            }
         }
     }
 

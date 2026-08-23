@@ -174,9 +174,11 @@ pub async fn execute(state: SemanState, cmd: Command) -> Response {
 
 async fn handle_command(state: SemanState, buf: &mut TokioTcpStream, cmd: Command) {
     let is_kill = matches!(cmd, Command::ServerKill);
-    let response = execute(state, cmd).await;
+    let response = execute(state.clone(), cmd).await;
     respond_to_client(buf, response).await;
     if is_kill {
+        let mut seman = state.lock().await;
+        seman.kill_all_services().await;
         std::process::exit(0);
     }
 }
@@ -268,10 +270,32 @@ pub fn run_server() -> Result<()> {
         .context("failed to initialize tokio runtime")?
         .block_on(async {
             super::init::run_init_file(state.clone()).await?;
+            #[cfg(unix)]
+            tokio::spawn(shutdown_on_signal(state.clone()));
             server_loop(state).await
         });
 
     info!("server finished");
 
     result
+}
+
+#[cfg(unix)]
+async fn shutdown_on_signal(state: SemanState) {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigint = match signal(SignalKind::interrupt()) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let mut sigterm = match signal(SignalKind::terminate()) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    tokio::select! {
+        _ = sigint.recv() => {}
+        _ = sigterm.recv() => {}
+    }
+    let mut seman = state.lock().await;
+    seman.kill_all_services().await;
+    std::process::exit(0);
 }
