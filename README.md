@@ -10,9 +10,11 @@ SEMAN allows you to define, start, restart and kill these processes making minim
 
 Here is an example of the shell interface.
 ```sh
+seman server-start
 seman defservice-start dunst dunst
 seman timer foo 10min "echo \"henlo word!\""
 seman timer-list
+seman server-kill
 ```
 
 ## SEMAN Commands
