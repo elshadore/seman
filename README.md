@@ -87,6 +87,8 @@ ${XDG_CONFIG_HOME}/seman/.semanrc
 ## FALLBACK HOME
 ${HOME}/.semanrc
 ${HOME}/seman/.semanrc
+${HOME}/.config/.semanrc
+${HOME}/.config/seman/.semanrc
 
 ```
 

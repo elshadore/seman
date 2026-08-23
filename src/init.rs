@@ -26,6 +26,8 @@ fn resolve_config_file() -> Option<File> {
             if !home.is_empty() {
                 candidates.push(format!("{home}/.semanrc"));
                 candidates.push(format!("{home}/seman/.semanrc"));
+                candidates.push(format!("{home}/.config/.semanrc"));
+                candidates.push(format!("{home}/.config/seman/.semanrc"));
             }
         }
     }
@@ -83,7 +85,7 @@ pub async fn run_init_file(state: SemanState) -> Result<()> {
             cmd,
             Command::ServerKill | Command::ServerStart | Command::ServerStatus
         ) {
-            bail!("server commands cannot be used in the init script: {line}");
+            warn!("server commands cannot be used in the init script: {line}");
         }
         let resp = super::server::execute(state.clone(), cmd).await;
         match resp {
