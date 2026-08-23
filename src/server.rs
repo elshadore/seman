@@ -19,6 +19,7 @@ struct ServiceInfo {
     name: String,
     command: String,
     running: bool,
+    exit_code: i32,
 }
 
 #[derive(Serialize)]
@@ -42,7 +43,7 @@ async fn respond_to_client(buf: &mut TokioTcpStream, resp: Response) {
 
 pub async fn execute(state: SemanState, cmd: Command) -> Response {
     let mut seman = state.lock().await;
-    
+
     seman.sync();
 
     match cmd {
@@ -82,6 +83,7 @@ pub async fn execute(state: SemanState, cmd: Command) -> Response {
                         name: name.clone(),
                         command: svc.cmd.clone(),
                         running: svc.proc.is_some(),
+                        exit_code: svc.exit_code,
                     })
                     .collect();
                 match serde_json::to_string(&infos) {
@@ -96,14 +98,14 @@ pub async fn execute(state: SemanState, cmd: Command) -> Response {
                     .enumerate()
                 {
                     let status = if value.proc.is_some() {
-                        "running"
+                        "running".to_string()
                     } else {
-                        "stopped"
+                        "stopped".to_string()
                     };
                     result.push_str(
                         format!(
-                            "[{i}] =>\n\tname: {key}\n\tcmd: {}\n\tstatus: {status}\n",
-                            value.cmd
+                            "[{i}] =>\n\tname: {key}\n\tcmd: {}\n\tstatus: {status}\n\tcode: {}\n",
+                            value.cmd, value.exit_code
                         )
                         .as_str(),
                     );

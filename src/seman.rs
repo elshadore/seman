@@ -12,11 +12,16 @@ use tokio::task::JoinHandle;
 pub struct Service {
     pub cmd: String,
     pub proc: Option<TokioProcess>,
+    pub exit_code: i32,
 }
 
 impl Service {
     pub fn new(cmd: String, proc: Option<TokioProcess>) -> Self {
-        Self { cmd, proc }
+        Self {
+            cmd,
+            proc,
+            exit_code: 0,
+        }
     }
 
     pub async fn start(&mut self) -> Result<()> {
@@ -24,6 +29,7 @@ impl Service {
 
         self.kill().await;
         self.proc = Some(proc);
+        self.exit_code = 0;
 
         Ok(())
     }
@@ -35,7 +41,11 @@ impl Service {
                     self.proc = Some(proc);
                     true
                 }
-                _ => false,
+                Ok(Some(status)) => {
+                    self.exit_code = status.code().unwrap_or(0);
+                    false
+                }
+                Err(_) => false,
             }
         } else {
             false
@@ -46,6 +56,7 @@ impl Service {
         if let Some(mut proc) = self.proc.take() {
             _ = proc.kill().await;
         }
+        self.exit_code = 0;
     }
 }
 
