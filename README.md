@@ -21,10 +21,10 @@ seman server-kill
 Below is a listing of all SEMAN commands.
 
 - `server-start`
-    Starts the SEMAN server. *WARNING* like all linux socket/TCP stuff you can kill the server and start it only to find the old process is still bound to the port.
-
+    Starts the SEMAN server as a *foreground* process, bound to port `7676`.
+    
 - `server-kill`
-    Kills the current SEMAN server. The same warning as in `server-start` also applies here.
+    Kills the current SEMAN server.
 
 - `server-status`
     Returns `server: ok!` if the server is active, returns `server: not found` if not server is found.

@@ -59,4 +59,4 @@ pub enum Response {
     Error(String),
 }
 
-pub const SOCKET: &str = "/tmp/seman.sock";
+pub const ADDR: &str = "127.0.0.1:7676";

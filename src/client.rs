@@ -1,9 +1,9 @@
 use super::{Command, Response};
 use anyhow::{Context, Result, bail};
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
+use std::net::TcpStream;
 
-fn send_command(stream: &mut UnixStream, cmd: Command) -> Result<String> {
+fn send_command(stream: &mut TcpStream, cmd: Command) -> Result<String> {
     let json = serde_json::to_string(&cmd)?;
     writeln!(stream, "{json}").context("failed to write message to server")?;
     let mut response = String::new();
@@ -26,7 +26,7 @@ fn handle_response(response: String) -> Result<()> {
 }
 
 pub fn server_command(cmd: Command) -> Result<()> {
-    let mut stream = UnixStream::connect(super::SOCKET).context("server is not available")?;
+    let mut stream = TcpStream::connect(super::ADDR).context("server is not available")?;
     let response = send_command(&mut stream, cmd)?;
     handle_response(response)
 }
@@ -36,7 +36,7 @@ pub fn server_kill_if_running() {
 }
 
 pub fn server_status() -> Result<()> {
-    if let Ok(mut stream) = UnixStream::connect(super::SOCKET) {
+    if let Ok(mut stream) = TcpStream::connect(super::ADDR) {
         let response = send_command(&mut stream, Command::ServerStatus)?;
         handle_response(response)?;
     } else {

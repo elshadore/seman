@@ -5,7 +5,7 @@ use seman::Command;
 fn exec(cmd: Command) -> Result<()> {
     match cmd {
         Command::ServerStart => {
-            seman::server::start_daemon()?;
+            seman::server::run_server()?;
         }
         Command::ServerStatus => {
             seman::client::server_status()?;

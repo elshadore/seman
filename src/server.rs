@@ -3,15 +3,14 @@ use super::Response;
 use super::seman::SemanState;
 use crate::seman::Seman;
 use anyhow::{Context, Result};
-use daemonize::Daemonize;
 use itertools::Itertools;
 use log::{debug, info, warn};
 use serde::Serialize;
-use std::fs::File;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream as TokioUnixStream;
+use tokio::net::TcpListener as TokioTcpListener;
+use tokio::net::TcpStream as TokioTcpStream;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
 
@@ -29,7 +28,7 @@ struct TimerInfo {
     remaining_seconds: f64,
 }
 
-async fn respond_to_client(buf: &mut TokioUnixStream, resp: Response) {
+async fn respond_to_client(buf: &mut TokioTcpStream, resp: Response) {
     let mut s = match serde_json::to_string(&resp) {
         Ok(s) => s,
         Err(_) => "{\"Error\":\"failed to serialize response\"}".to_string(),
@@ -170,19 +169,18 @@ pub async fn execute(state: SemanState, cmd: Command) -> Response {
     }
 }
 
-async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Command) {
+async fn handle_command(state: SemanState, buf: &mut TokioTcpStream, cmd: Command) {
     let is_kill = matches!(cmd, Command::ServerKill);
     let response = execute(state, cmd).await;
     respond_to_client(buf, response).await;
     if is_kill {
-        let _ = std::fs::remove_file(super::SOCKET);
         std::process::exit(0);
     }
 }
 
 /// This function should not error and handle all errors by logging.
 /// We should make sure we never get any malformed state from here on out.
-async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) {
+async fn handle_connection(mut stream: TokioTcpStream, state: SemanState) {
     let mut line = String::new();
     let mut buf = BufReader::new(&mut stream);
 
@@ -222,22 +220,27 @@ async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) {
 }
 
 async fn server_loop(state: SemanState) -> Result<()> {
-    let _ = std::fs::remove_file(super::SOCKET);
-    let listener =
-        tokio::net::UnixListener::bind(super::SOCKET).context("failed to bind to unix socked")?;
+    let listener = bind_reuseaddr(super::ADDR).context("failed to bind to tcp address")?;
     loop {
-        let (stream, _) = listener.accept().await.context("socket listening failed")?;
+        let (stream, _) = listener.accept().await.context("tcp listening failed")?;
         let state = state.clone();
         tokio::spawn(handle_connection(stream, state));
     }
+}
+
+fn bind_reuseaddr(addr: &str) -> Result<TokioTcpListener> {
+    use std::net::TcpListener;
+    let std_listener = TcpListener::bind(addr).context("failed to bind tcp listener")?;
+    std_listener
+        .set_nonblocking(true)
+        .context("failed to set listener non-blocking")?;
+    TokioTcpListener::from_std(std_listener).context("failed to convert listener")
 }
 
 fn init_logger() -> Result<()> {
     use simplelog::*;
     use time::format_description::FormatItem;
     use time::format_description::parse_borrowed;
-    let log_path = "/tmp/seman.log";
-    let file = File::create(log_path).context("failed to open log file: {log_path}")?;
     let fmt: Vec<FormatItem<'static>> =
         parse_borrowed::<2>("[year]-[month]-[day] [hour]:[minute]:[second]")
             .context("invalid log time format")?;
@@ -250,24 +253,11 @@ fn init_logger() -> Result<()> {
         .ok()
         .and_then(|s| s.parse::<LevelFilter>().ok())
         .unwrap_or(LevelFilter::Info);
-    WriteLogger::init(level, config, file).context("failed to initialize logger")?;
+    SimpleLogger::init(level, config).context("failed to initialize logger")?;
     Ok(())
 }
 
-pub fn start_daemon() -> Result<()> {
-    let stdout = File::create("/tmp/seman.out")
-        .context("failed to open daemon stdout file: /tmp/seman.out")?;
-
-    let stderr = File::create("/tmp/seman.err")
-        .context("failed to open daemon stderr file: /tmp/seman.err")?;
-
-    Daemonize::new()
-        .pid_file("/tmp/seman.pid")
-        .stdout(stdout)
-        .stderr(stderr)
-        .start()
-        .context("failed to start server daemon")?;
-
+pub fn run_server() -> Result<()> {
     init_logger()?;
 
     info!("server started");
