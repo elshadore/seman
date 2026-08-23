@@ -247,9 +247,14 @@ pub fn start_daemon() -> Result<()> {
         .context("failed to start server daemon")?;
 
     init_logger()?;
+    
     info!("server started");
 
-    tokio::runtime::Runtime::new()
+    let result = tokio::runtime::Runtime::new()
         .context("failed to initialize tokio runtime")?
-        .block_on(server_loop())
+        .block_on(server_loop());
+    
+    info!("server finished");
+    
+    result
 }
