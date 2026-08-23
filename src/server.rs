@@ -40,10 +40,8 @@ macro_rules! respond_err {
 
 async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Command) {
     let mut seman = state.lock().await;
-
-    if let Err(err) = seman.sync() {
-        error!("errors synchronizing state of seman: {err}");
-    }
+    
+    seman.sync();
 
     match cmd {
         Command::ServerStart => {
@@ -139,6 +137,7 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
         Command::TimerList => {
             let now = Instant::now();
             let mut result = String::new();
+            
             for (i, timer) in seman
                 .iter_timers()
                 .sorted_by(|a, b| {

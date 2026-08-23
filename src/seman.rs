@@ -19,30 +19,32 @@ impl Service {
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        self.kill().await?;
-
         let proc = TokioCommand::new("sh").args(["-c", &self.cmd]).spawn()?;
 
+        self.kill().await;
         self.proc = Some(proc);
 
         Ok(())
     }
 
-    pub fn sync(&mut self) -> Result<()> {
+    pub fn is_active(&mut self) -> bool {
         if let Some(mut proc) = self.proc.take() {
-            match proc.try_wait()? {
-                None => self.proc = Some(proc),
-                Some(_) => {}
+            match proc.try_wait() {
+                Ok(None) => {
+                    self.proc = Some(proc);
+                    true
+                }
+                _ => false,
             }
+        } else {
+            false
         }
-        Ok(())
     }
 
-    pub async fn kill(&mut self) -> Result<()> {
+    pub async fn kill(&mut self) {
         if let Some(mut proc) = self.proc.take() {
-            proc.kill().await?;
+            _ = proc.kill().await;
         }
-        Ok(())
     }
 }
 
@@ -55,7 +57,12 @@ pub struct Timer {
 }
 
 impl Timer {
-    pub fn new(name: String, cmd: Option<String>, duration: Duration, handle: JoinHandle<()>) -> Self {
+    pub fn new(
+        name: String,
+        cmd: Option<String>,
+        duration: Duration,
+        handle: JoinHandle<()>,
+    ) -> Self {
         let deadline = Instant::now() + duration;
         Self {
             name,
@@ -64,6 +71,10 @@ impl Timer {
             deadline,
             handle,
         }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.handle.is_finished()
     }
 }
 
@@ -88,7 +99,7 @@ impl Seman {
             service.start().await?;
         }
         if let Some(mut result) = self.services.insert(name, service) {
-            result.kill().await?;
+            result.kill().await;
         }
         Ok(())
     }
@@ -104,18 +115,17 @@ impl Seman {
 
     pub async fn service_stop(&mut self, name: String) -> Result<()> {
         if let Some(result) = self.services.get_mut(&name) {
-            result.kill().await?;
+            result.kill().await;
             Ok(())
         } else {
             bail!("service: {name}, does not exist, and so cannot be stopped!")
         }
     }
 
-    pub fn service_sync(&mut self) -> Result<()> {
+    pub fn service_sync(&mut self) {
         for (_, service) in self.services.iter_mut() {
-            service.sync()?;
+            _ = service.is_active();
         }
-        Ok(())
     }
 
     pub fn iter_services(&self) -> impl Iterator<Item = (&String, &Service)> {
@@ -131,6 +141,7 @@ impl Seman {
             }
         });
         self.timers.push(Timer::new(name, cmd, duration, handle));
+        self.timer_sync();
     }
 
     pub fn timer_kill(&mut self, name: impl AsRef<str>) {
@@ -151,9 +162,8 @@ impl Seman {
         self.timers.iter()
     }
 
-    pub fn sync(&mut self) -> Result<()> {
-        self.service_sync()?;
+    pub fn sync(&mut self) {
+        self.service_sync();
         self.timer_sync();
-        Ok(())
     }
 }
