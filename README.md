@@ -76,8 +76,9 @@ Below is a listing of all SEMAN commands.
 When initially starting the `seman server-start`, the `.semanrc` config file will be ran. This is interpretted as a list of SEMAN commands. Server commands cannot be used this mode *obviously*. SEMAN will attempt to find this file in the following locations.
 
 ```sh
-## SEMANRC env variable
-$SEMANRC
+## SEMAN_CONFIG env variable
+## If this is set, config file searching is disabled.
+$SEMAN_CONFIG
 
 ## XDG HOME
 ${XDG_CONFIG_HOME}/.semanrc

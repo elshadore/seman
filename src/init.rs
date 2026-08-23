@@ -10,9 +10,9 @@ use std::io::Read;
 
 fn resolve_config_file() -> Option<File> {
     let mut candidates: Vec<String> = Vec::new();
-    if let Ok(p) = std::env::var("SEMANRC") {
+    if let Ok(p) = std::env::var("SEMEN_CONFIG") {
         if !p.is_empty() {
-            info!("SEMANRC config environment variable read: {p}");
+            info!("SEMEN_CONFIG config environment variable read: {p}");
             candidates.push(p);
         }
     } else {
