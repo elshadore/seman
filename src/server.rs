@@ -1,203 +1,76 @@
-use super::ClientCommand;
-use anyhow::{Context, Result, bail};
+use super::Command;
+use super::seman::SemanState;
+use crate::seman::Seman;
+use anyhow::{Context, Result};
 use daemonize::Daemonize;
 use itertools::Itertools;
-use std::collections::HashMap;
 use std::fs::File;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream as TokioUnixStream;
-use tokio::process::Child as TokioProcess;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 
-pub struct Service {
-    pub cmd: String,
-    pub proc: Option<TokioProcess>,
+async fn client_respond(buf: &mut TokioUnixStream, message: impl AsRef<str>) {
+    _ = buf.write_all(message.as_ref().as_bytes()).await;
+    _ = buf.write(b"\n").await;
 }
 
-impl Service {
-    pub fn new(cmd: String, proc: Option<TokioProcess>) -> Self {
-        Self { cmd, proc }
-    }
-
-    pub async fn start(&mut self) -> Result<()> {
-        self.kill().await?;
-
-        let proc = TokioCommand::new("sh").args(["-c", &self.cmd]).spawn()?;
-
-        self.proc = Some(proc);
-
-        Ok(())
-    }
-
-    pub fn sync(&mut self) -> Result<()> {
-        if let Some(mut proc) = self.proc.take() {
-            match proc.try_wait()? {
-                None => self.proc = Some(proc),
-                Some(_) => {}
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn kill(&mut self) -> Result<()> {
-        if let Some(mut proc) = self.proc.take() {
-            proc.kill().await?;
-        }
-        Ok(())
-    }
+async fn client_respond_error(buf: &mut TokioUnixStream, message: impl AsRef<str>) {
+    let message = message.as_ref();
+    client_respond(buf, message).await;
+    eprintln!("{message}");
 }
 
-pub struct Timer {
-    pub name: String,
-    pub cmd: String,
-    pub duration: Duration,
-    pub handle: JoinHandle<()>,
-}
-
-impl Timer {
-    pub fn new(name: String, cmd: String, duration: Duration, handle: JoinHandle<()>) -> Self {
-        Self {
-            name,
-            cmd,
-            duration,
-            handle,
-        }
-    }
-}
-
-pub struct Seman {
-    services: HashMap<String, Service>,
-    timers: Vec<Timer>,
-}
-
-impl Seman {
-    pub fn new() -> Self {
-        Self {
-            services: HashMap::new(),
-            timers: Vec::new(),
-        }
-    }
-
-    pub async fn service_define(&mut self, name: String, cmd: String, start: bool) -> Result<()> {
-        let mut service = Service::new(cmd, None);
-        if start {
-            service.start().await?;
-        }
-        if let Some(mut result) = self.services.insert(name, service) {
-            result.kill().await?;
-        }
-        Ok(())
-    }
-
-    pub async fn service_start(&mut self, name: String) -> Result<()> {
-        if let Some(result) = self.services.get_mut(&name) {
-            result.start().await?;
-            Ok(())
-        } else {
-            bail!("service: {name}, does not exist, and so cannot be started!")
-        }
-    }
-
-    pub async fn service_stop(&mut self, name: String) -> Result<()> {
-        if let Some(result) = self.services.get_mut(&name) {
-            result.kill().await?;
-            Ok(())
-        } else {
-            bail!("service: {name}, does not exist, and so cannot be stopped!")
-        }
-    }
-
-    pub fn service_sync(&mut self) -> Result<()> {
-        for (_, service) in self.services.iter_mut() {
-            service.sync()?;
-        }
-        Ok(())
-    }
-
-    pub fn iter_services(&self) -> impl Iterator<Item = (&String, &Service)> {
-        self.services.iter()
-    }
-
-    pub fn timer_add(&mut self, name: String, duration: Duration, cmd: String) {
-        let cmd1 = cmd.clone();
-        let handle = tokio::spawn(async move {
-            tokio::time::sleep(duration).await;
-            let _ = TokioCommand::new("sh").args(["-c", &cmd1]).output().await;
-        });
-        self.timers.push(Timer::new(name, cmd, duration, handle));
-    }
-
-    pub fn timer_kill(&mut self, name: impl AsRef<str>) {
-        let name = name.as_ref();
-        for t in self.timers.iter_mut() {
-            if t.name == name {
-                t.handle.abort();
-            }
-        }
-        self.timer_sync();
-    }
-
-    pub fn timer_sync(&mut self) {
-        self.timers.retain(|t| !t.handle.is_finished());
-    }
-
-    pub fn iter_timers(&self) -> impl Iterator<Item = &Timer> {
-        self.timers.iter()
-    }
-
-    pub fn sync(&mut self) -> Result<()> {
-        self.service_sync()?;
-        self.timer_sync();
-        Ok(())
-    }
-}
-
-pub type SemanState = Arc<Mutex<Seman>>;
-
-async fn respond(buf: &mut TokioUnixStream, message: impl AsRef<str>) -> Result<()> {
-    buf.write_all(message.as_ref().as_bytes()).await?;
-    buf.write(b"\n").await?;
-    Ok(())
-}
-
-async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) -> Result<()> {
-    let mut line = String::new();
-    let mut buf = BufReader::new(&mut stream);
-    if buf.read_line(&mut line).await? == 0 {
-        return Ok(());
-    }
-    let cmd: ClientCommand = serde_json::from_str(line.trim())?;
-
+async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Command) {
     let mut seman = state.lock().await;
-    seman.sync()?;
+
+    if let Err(err) = seman.sync() {
+        eprintln!("error: errors synchronizing state of seman: {err}");
+    }
 
     match cmd {
-        ClientCommand::ServerStart => {
-            respond(buf.get_mut(), "error: unknown command").await?;
+        Command::Ping => {
+            client_respond(buf, "pong").await;
         }
-        ClientCommand::Ping => {
-            respond(buf.get_mut(), "pong").await?;
-        }
-        ClientCommand::ServerKill => {
+        Command::ServerKill => {
             let _ = std::fs::remove_file("/tmp/seman.sock");
             std::process::exit(0);
         }
-        ClientCommand::Exec { cmd } => {
-            let proc = TokioCommand::new("sh").args(["-c", &cmd]).spawn()?;
-            let id = proc.id().unwrap_or(0);
-            respond(buf.get_mut(), format!("{id}")).await?;
+        Command::Exec { cmd } => match TokioCommand::new("sh").args(["-c", &cmd]).spawn() {
+            Ok(proc) => {
+                let id = proc.id().unwrap_or(0);
+                client_respond(buf, format!("{id}")).await;
+            }
+            Err(err) => {
+                eprintln!("error: failed to spawn the command: {cmd}, in command exec, err: {err}");
+            }
+        },
+        Command::DefServiceStart { name, cmd } => {
+            if let Err(err) = seman.service_define(name, cmd, true).await {
+                client_respond_error(buf, format!("error: errors during defservice-start: {err}"))
+                    .await;
+            }
         }
-        ClientCommand::DefServiceStart { name, cmd } => {
-            seman.service_define(name, cmd, true).await?
+        Command::DefService { name, cmd } => {
+            if let Err(err) = seman.service_define(name, cmd, false).await {
+                client_respond_error(buf, format!("error: errors during defservice: {err}")).await;
+            }
         }
-        ClientCommand::DefService { name, cmd } => seman.service_define(name, cmd, false).await?,
-        ClientCommand::ServiceStart { name } => seman.service_start(name).await?,
-        ClientCommand::ServiceStop { name } => seman.service_stop(name).await?,
-        ClientCommand::ServiceList => {
+        Command::ServiceStart { name } => {
+            if let Err(err) = seman.service_start(name).await {
+                client_respond_error(buf, format!("error: errors during service-start: {err}"))
+                    .await;
+            }
+        }
+        Command::ServiceStop { name } => {
+            if let Err(err) = seman.service_stop(name).await {
+                client_respond_error(buf, format!("error: errors during service-stop: {err}"))
+                    .await;
+            }
+        }
+        Command::ServiceList => {
             let mut result = String::new();
             for (i, (key, value)) in seman
                 .iter_services()
@@ -217,52 +90,93 @@ async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) -> Re
                     .as_str(),
                 );
             }
-            respond(buf.get_mut(), result).await?;
+            client_respond(buf, result).await;
         }
-        ClientCommand::ServerStatus => {
-            respond(buf.get_mut(), "server: ok!").await?;
+        Command::ServerStatus => {
+            client_respond(buf, "server: ok!").await;
         }
-        ClientCommand::Timer { name, time, cmd } => match humantime::parse_duration(&time) {
+        Command::Timer { name, time, cmd } => match humantime::parse_duration(&time) {
             Ok(duration) => {
                 seman.timer_add(name, duration, cmd);
             }
             Err(err) => {
-                respond(buf.get_mut(), format!("error: invalid time format: {err}")).await?;
+                client_respond(buf, format!("error: invalid time format: {err}")).await;
             }
         },
-        ClientCommand::TimerKill { name } => {
+        Command::TimerKill { name } => {
             seman.timer_kill(name);
         }
-        ClientCommand::Timers => {
+        Command::TimerList => {
+            let now = Instant::now();
             let mut result = String::new();
             for (i, timer) in seman
                 .iter_timers()
                 .sorted_by(|a, b| {
-                    a.duration
-                        .cmp(&b.duration)
+                    a.deadline
+                        .cmp(&b.deadline)
                         .then_with(|| a.name.cmp(&b.name))
                 })
                 .enumerate()
             {
+                let remaining = timer.deadline.saturating_duration_since(now);
                 result.push_str(
                     format!(
                         "[{i}] =>\n\tname: {}\n\tcmd: {}\n\ttime: {:?}\n",
-                        timer.name, timer.cmd, timer.duration
+                        timer.name, timer.cmd, remaining
                     )
                     .as_str(),
                 );
             }
+            client_respond(buf, result).await;
+        }
+        _ => {
+            client_respond(buf, "error: unknown command").await;
         }
     }
-    Ok(())
+}
+
+/// This function should not error and handle all errors by logging.
+/// We should make sure we never get any malformed state from here on out.
+async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) {
+    let mut line = String::new();
+    let mut buf = BufReader::new(&mut stream);
+
+    match buf.read_line(&mut line).await {
+        Ok(count) => {
+            if count == 0 {
+                return;
+            }
+        }
+        Err(err) => {
+            client_respond_error(buf.get_mut(), format!("error: malform line read: {err}")).await;
+            return;
+        }
+    }
+
+    let string = line.trim();
+    println!("input-from-client: {string}");
+    match serde_json::from_str(string) {
+        Ok(cmd) => {
+            println!("command-parsed: {cmd:?}");
+            handle_command(state, buf.get_mut(), cmd).await;
+        }
+        Err(err) => {
+            client_respond_error(
+                buf.get_mut(),
+                format!("error: malformed message sent to the server: {string}, err: {err}"),
+            )
+            .await
+        }
+    }
 }
 
 async fn server_loop() -> Result<()> {
     let _ = std::fs::remove_file(super::SOCKET);
-    let listener = tokio::net::UnixListener::bind(super::SOCKET)?;
+    let listener =
+        tokio::net::UnixListener::bind(super::SOCKET).context("failed to bind to unix socked")?;
     let state = Arc::new(Mutex::new(Seman::new()));
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = listener.accept().await.context("socket listening failed")?;
         let state = state.clone();
         tokio::spawn(handle_connection(stream, state));
     }
