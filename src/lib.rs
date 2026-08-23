@@ -1,7 +1,7 @@
 pub mod client;
+pub mod init;
 pub mod seman;
 pub mod server;
-pub mod init;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
