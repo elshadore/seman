@@ -26,7 +26,9 @@ fn handle_response(response: String) -> Result<()> {
 }
 
 pub fn server_command(cmd: Command) -> Result<()> {
-    let mut stream = TcpStream::connect(super::ADDR).context("server is not available")?;
+    let port = super::resolve_port();
+    let mut stream =
+        TcpStream::connect(&port).context(format!("server is not available at port: {port}"))?;
     let response = send_command(&mut stream, cmd)?;
     handle_response(response)
 }
@@ -36,11 +38,12 @@ pub fn server_kill_if_running() {
 }
 
 pub fn server_status() -> Result<()> {
-    if let Ok(mut stream) = TcpStream::connect(super::ADDR) {
+    let port = super::resolve_port();
+    if let Ok(mut stream) = TcpStream::connect(&port) {
         let response = send_command(&mut stream, Command::ServerStatus)?;
         handle_response(response)?;
     } else {
-        println!("server: not found!")
+        println!("server: not found at port: {port}")
     }
     Ok(())
 }

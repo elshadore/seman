@@ -17,11 +17,13 @@ seman timer-list
 seman server-kill
 ```
 
+The SEMAN server will bind to port `7676` by default, this can be configured by the environment variable `SEMAN_PORT`.
+
 ## SEMAN Commands
 Below is a listing of all SEMAN commands.
 
 - `server-start`
-    Starts the SEMAN server as a *foreground* process, bound to port `7676`.
+    Starts the SEMAN server as a *foreground* process.
     
 - `server-kill`
     Kills the current SEMAN server.

@@ -59,4 +59,13 @@ pub enum Response {
     Error(String),
 }
 
-pub const ADDR: &str = "127.0.0.1:7676";
+pub const DEFAULT_PORT: &str = "127.0.0.1:7676";
+
+pub fn resolve_port() -> String {
+    if let Ok(p) = std::env::var("SEMAN_PORT") {
+        if let Ok(port) = p.trim().parse::<u16>() {
+            return format!("127.0.0.1:{port}");
+        }
+    }
+    DEFAULT_PORT.to_string()
+}

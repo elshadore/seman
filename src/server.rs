@@ -221,7 +221,8 @@ async fn handle_connection(mut stream: TokioTcpStream, state: SemanState) {
 }
 
 async fn server_loop(state: SemanState) -> Result<()> {
-    let listener = bind_reuseaddr(super::ADDR).context("failed to bind to tcp address")?;
+    let port = super::resolve_port();
+    let listener = bind_reuse_port(&port).context(format!("failed to bind to port: {port}"))?;
     loop {
         let (stream, _) = listener.accept().await.context("tcp listening failed")?;
         let state = state.clone();
@@ -229,9 +230,9 @@ async fn server_loop(state: SemanState) -> Result<()> {
     }
 }
 
-fn bind_reuseaddr(addr: &str) -> Result<TokioTcpListener> {
+fn bind_reuse_port(port: &str) -> Result<TokioTcpListener> {
     use std::net::TcpListener;
-    let std_listener = TcpListener::bind(addr).context("failed to bind tcp listener")?;
+    let std_listener = TcpListener::bind(port).context("failed to bind tcp listener")?;
     std_listener
         .set_nonblocking(true)
         .context("failed to set listener non-blocking")?;
