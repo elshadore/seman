@@ -31,4 +31,11 @@ pub enum Command {
     Ping,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Response {
+    Ok,
+    OkMsg(String),
+    Error(String),
+}
+
 pub const SOCKET: &str = "/tmp/seman.sock";

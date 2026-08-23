@@ -1,4 +1,5 @@
 use super::Command;
+use super::Response;
 use super::seman::SemanState;
 use crate::seman::Seman;
 use anyhow::{Context, Result};
@@ -12,15 +13,28 @@ use tokio::net::UnixStream as TokioUnixStream;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
 
-async fn client_respond(buf: &mut TokioUnixStream, message: impl AsRef<str>) {
-    _ = buf.write_all(message.as_ref().as_bytes()).await;
-    _ = buf.write(b"\n").await;
+async fn respond(buf: &mut TokioUnixStream, resp: Response) {
+    let mut s = match serde_json::to_string(&resp) {
+        Ok(s) => s,
+        Err(_) => "{\"Error\":\"failed to serialize response\"}".to_string(),
+    };
+    s.push('\n');
+    let _ = buf.write_all(s.as_bytes()).await;
+    if let Response::Error(msg) = &resp {
+        eprintln!("error: {msg}");
+    }
 }
 
-async fn client_respond_error(buf: &mut TokioUnixStream, message: impl AsRef<str>) {
-    let message = message.as_ref();
-    client_respond(buf, message).await;
-    eprintln!("{message}");
+macro_rules! respond_ok {
+    ($buf:expr, $($arg:tt)*) => {
+        respond($buf, Response::OkMsg(format!($($arg)*)))
+    };
+}
+
+macro_rules! respond_err {
+    ($buf:expr, $($arg:tt)*) => {
+        respond($buf, Response::Error(format!($($arg)*)))
+    };
 }
 
 async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Command) {
@@ -32,45 +46,55 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
 
     match cmd {
         Command::ServerStart => {
-            client_respond(buf, "error: unknown command").await;
+            respond_err!(buf, "unknown command").await;
         }
         Command::Ping => {
-            client_respond(buf, "pong").await;
+            respond_ok!(buf, "pong").await;
         }
         Command::ServerKill => {
             let _ = std::fs::remove_file("/tmp/seman.sock");
+            respond(buf, Response::Ok).await;
             std::process::exit(0);
         }
         Command::Exec { cmd } => match TokioCommand::new("sh").args(["-c", &cmd]).spawn() {
             Ok(proc) => {
                 let id = proc.id().unwrap_or(0);
-                client_respond(buf, format!("{id}")).await;
+                respond_ok!(buf, "{}", id).await;
             }
             Err(err) => {
-                eprintln!("error: failed to spawn the command: {cmd}, in command exec, err: {err}");
+                respond_err!(
+                    buf,
+                    "failed to spawn the command: {cmd}, in command exec, err: {err}"
+                )
+                .await;
             }
         },
         Command::DefServiceStart { name, cmd } => {
             if let Err(err) = seman.service_define(name, cmd, true).await {
-                client_respond_error(buf, format!("error: errors during defservice-start: {err}"))
-                    .await;
+                respond_err!(buf, "errors during defservice-start: {err}").await;
+            } else {
+                respond(buf, Response::Ok).await;
             }
         }
         Command::DefService { name, cmd } => {
             if let Err(err) = seman.service_define(name, cmd, false).await {
-                client_respond_error(buf, format!("error: errors during defservice: {err}")).await;
+                respond_err!(buf, "errors during defservice: {err}").await;
+            } else {
+                respond(buf, Response::Ok).await;
             }
         }
         Command::ServiceStart { name } => {
             if let Err(err) = seman.service_start(name).await {
-                client_respond_error(buf, format!("error: errors during service-start: {err}"))
-                    .await;
+                respond_err!(buf, "errors during service-start: {err}").await;
+            } else {
+                respond(buf, Response::Ok).await;
             }
         }
         Command::ServiceStop { name } => {
             if let Err(err) = seman.service_stop(name).await {
-                client_respond_error(buf, format!("error: errors during service-stop: {err}"))
-                    .await;
+                respond_err!(buf, "errors during service-stop: {err}").await;
+            } else {
+                respond(buf, Response::Ok).await;
             }
         }
         Command::ServiceList => {
@@ -93,21 +117,23 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
                     .as_str(),
                 );
             }
-            client_respond(buf, result).await;
+            respond_ok!(buf, "{}", result).await;
         }
         Command::ServerStatus => {
-            client_respond(buf, "server: ok!").await;
+            respond_ok!(buf, "server: ok!").await;
         }
         Command::Timer { name, time, cmd } => match humantime::parse_duration(&time) {
             Ok(duration) => {
                 seman.timer_add(name, duration, cmd);
+                respond(buf, Response::Ok).await;
             }
             Err(err) => {
-                client_respond(buf, format!("error: invalid time format: {err}")).await;
+                respond_err!(buf, "invalid time format: {err}").await;
             }
         },
         Command::TimerKill { name } => {
             seman.timer_kill(name);
+            respond(buf, Response::Ok).await;
         }
         Command::TimerList => {
             let now = Instant::now();
@@ -132,7 +158,7 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
                     .as_str(),
                 );
             }
-            client_respond(buf, result).await;
+            respond_ok!(buf, "{}", result).await;
         }
     }
 }
@@ -150,7 +176,7 @@ async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) {
             }
         }
         Err(err) => {
-            client_respond_error(buf.get_mut(), format!("error: malform line read: {err}")).await;
+            respond_err!(buf.get_mut(), "malform line read: {err}").await;
             return;
         }
     }
@@ -163,9 +189,9 @@ async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) {
             handle_command(state, buf.get_mut(), cmd).await;
         }
         Err(err) => {
-            client_respond_error(
+            respond_err!(
                 buf.get_mut(),
-                format!("error: malformed message sent to the server: {string}, err: {err}"),
+                "malformed message sent to the server: {string}, err: {err}"
             )
             .await
         }
