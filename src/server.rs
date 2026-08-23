@@ -271,7 +271,7 @@ pub fn run_server() -> Result<()> {
         .block_on(async {
             super::init::run_init_file(state.clone()).await?;
             #[cfg(unix)]
-            tokio::spawn(shutdown_on_signal(state.clone()));
+            shutdown_on_signal(state.clone());
             server_loop(state).await
         });
 
@@ -281,21 +281,18 @@ pub fn run_server() -> Result<()> {
 }
 
 #[cfg(unix)]
-async fn shutdown_on_signal(state: SemanState) {
+fn shutdown_on_signal(state: SemanState) {
     use tokio::signal::unix::{signal, SignalKind};
-    let mut sigint = match signal(SignalKind::interrupt()) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    let mut sigterm = match signal(SignalKind::terminate()) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    tokio::select! {
-        _ = sigint.recv() => {}
-        _ = sigterm.recv() => {}
+    let kinds = [SignalKind::interrupt(), SignalKind::terminate()];
+    for kind in kinds {
+        if let Ok(mut sig) = signal(kind) {
+            let state = state.clone();
+            tokio::spawn(async move {
+                sig.recv().await;
+                let mut seman = state.lock().await;
+                seman.kill_all_services().await;
+                std::process::exit(0);
+            });
+        }
     }
-    let mut seman = state.lock().await;
-    seman.kill_all_services().await;
-    std::process::exit(0);
 }
