@@ -2,6 +2,7 @@ use super::Command;
 use super::Response;
 use super::seman::SemanState;
 use crate::seman::Seman;
+use log::{debug, error, info, warn};
 use anyhow::{Context, Result};
 use daemonize::Daemonize;
 use itertools::Itertools;
@@ -21,7 +22,7 @@ async fn respond(buf: &mut TokioUnixStream, resp: Response) {
     s.push('\n');
     let _ = buf.write_all(s.as_bytes()).await;
     if let Response::Error(msg) = &resp {
-        eprintln!("error: {msg}");
+        warn!("response error: {msg}");
     }
 }
 
@@ -41,7 +42,7 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
     let mut seman = state.lock().await;
 
     if let Err(err) = seman.sync() {
-        eprintln!("error: errors synchronizing state of seman: {err}");
+        error!("errors synchronizing state of seman: {err}");
     }
 
     match cmd {
@@ -182,10 +183,10 @@ async fn handle_connection(mut stream: TokioUnixStream, state: SemanState) {
     }
 
     let string = line.trim();
-    println!("input-from-client: {string}");
+    debug!("input-from-client: {string}");
     match serde_json::from_str(string) {
         Ok(cmd) => {
-            println!("command-parsed: {cmd:?}");
+            debug!("command-parsed: {cmd:?}");
             handle_command(state, buf.get_mut(), cmd).await;
         }
         Err(err) => {
@@ -210,6 +211,28 @@ async fn server_loop() -> Result<()> {
     }
 }
 
+fn init_logger() -> Result<()> {
+    use simplelog::*;
+    use time::format_description::parse_borrowed;
+    let log_path = "/tmp/seman.log";
+    let file = File::create(log_path).context("failed to open log file: {log_path}")?;
+    let fmt: Vec<time::format_description::FormatItem<'static>> =
+        parse_borrowed::<2>("[year]-[month]-[day] [hour]:[minute]:[second]")
+            .context("invalid log time format")?;
+    let fmt: &'static [time::format_description::FormatItem<'static>] =
+        Box::leak(fmt.into_boxed_slice());
+    let mut builder = ConfigBuilder::new();
+    builder.set_time_format_custom(fmt);
+    let _ = builder.set_time_offset_to_local();
+    let config = builder.build();
+    let level = std::env::var("SEMAN_LOG_LEVEL")
+        .ok()
+        .and_then(|s| s.parse::<LevelFilter>().ok())
+        .unwrap_or(LevelFilter::Info);
+    WriteLogger::init(level, config, file).context("failed to initialize logger")?;
+    Ok(())
+}
+
 pub fn start_daemon() -> Result<()> {
     let stdout = File::create("/tmp/seman.out")
         .context("failed to open daemon stdout file: /tmp/seman.out")?;
@@ -223,9 +246,10 @@ pub fn start_daemon() -> Result<()> {
         .stderr(stderr)
         .start()
         .context("failed to start server daemon")?;
-    
-    println!("server-started!");
-    
+
+    init_logger()?;
+    info!("server started");
+
     tokio::runtime::Runtime::new()
         .context("failed to initialize tokio runtime")?
         .block_on(server_loop())
