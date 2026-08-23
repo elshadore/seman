@@ -6,24 +6,41 @@ use anyhow::bail;
 use clap::Parser;
 use log::{debug, info};
 
-fn resolve_config_path() -> String {
+fn resolve_config_paths() -> Vec<String> {
     if let Ok(p) = std::env::var("SEMANRC") {
-        return p;
+        if !p.is_empty() {
+            return vec![p];
+        }
     }
 
-    match std::env::var("XDG_CONFIG_HOME") {
-        Ok(xdg_home) => {
-            format!("{xdg_home}/.config/seman/.semanrc")
-        }
-        Err(_) => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            format!("{home}/.config/seman/.semanrc")
+    let mut paths = Vec::new();
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            paths.push(format!("{xdg}/.semanrc"));
+            paths.push(format!("{xdg}/seman/.semanrc"));
         }
     }
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            paths.push(format!("{home}/.semanrc"));
+            paths.push(format!("{home}/seman/.semanrc"));
+        }
+    }
+    paths
 }
 
 pub async fn run_init_file(state: SemanState) -> Result<()> {
-    let path = resolve_config_path();
+    let path = match resolve_config_paths()
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())
+    {
+        Some(p) => p,
+        None => {
+            info!("no init file found, skipping");
+            return Ok(());
+        }
+    };
+
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => {
