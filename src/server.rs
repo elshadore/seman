@@ -2,7 +2,8 @@ use super::Command;
 use super::Response;
 use super::seman::SemanState;
 use crate::seman::Seman;
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
+use serde::Serialize;
 use anyhow::{Context, Result};
 use daemonize::Daemonize;
 use itertools::Itertools;
@@ -38,9 +39,23 @@ macro_rules! respond_err {
     };
 }
 
+#[derive(Serialize)]
+struct ServiceInfo {
+    name: String,
+    command: String,
+    running: bool,
+}
+
+#[derive(Serialize)]
+struct TimerInfo {
+    name: String,
+    command: Option<String>,
+    remaining_seconds: f64,
+}
+
 async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Command) {
     let mut seman = state.lock().await;
-    
+
     seman.sync();
 
     match cmd {
@@ -96,27 +111,43 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
                 respond(buf, Response::Ok).await;
             }
         }
-        Command::ServiceList => {
-            let mut result = String::new();
-            for (i, (key, value)) in seman
-                .iter_services()
-                .sorted_by(|(a, _), (b, _)| a.cmp(b))
-                .enumerate()
-            {
-                let status = if value.proc.is_some() {
-                    "running"
-                } else {
-                    "stopped"
-                };
-                result.push_str(
-                    format!(
-                        "[{i}] =>\n\tname: {key}\n\tcmd: {}\n\tstatus: {status}\n",
-                        value.cmd
-                    )
-                    .as_str(),
-                );
+        Command::ServiceList { json } => {
+            if json {
+                let infos: Vec<ServiceInfo> = seman
+                    .iter_services()
+                    .sorted_by(|(a, _), (b, _)| a.cmp(b))
+                    .map(|(name, svc)| ServiceInfo {
+                        name: name.clone(),
+                        command: svc.cmd.clone(),
+                        running: svc.proc.is_some(),
+                    })
+                    .collect();
+                match serde_json::to_string(&infos) {
+                    Ok(s) => respond_ok!(buf, "{}", s).await,
+                    Err(e) => respond_err!(buf, "failed to serialize service list: {e}").await,
+                }
+            } else {
+                let mut result = String::new();
+                for (i, (key, value)) in seman
+                    .iter_services()
+                    .sorted_by(|(a, _), (b, _)| a.cmp(b))
+                    .enumerate()
+                {
+                    let status = if value.proc.is_some() {
+                        "running"
+                    } else {
+                        "stopped"
+                    };
+                    result.push_str(
+                        format!(
+                            "[{i}] =>\n\tname: {key}\n\tcmd: {}\n\tstatus: {status}\n",
+                            value.cmd
+                        )
+                        .as_str(),
+                    );
+                }
+                respond_ok!(buf, "{}", result).await;
             }
-            respond_ok!(buf, "{}", result).await;
         }
         Command::ServerStatus => {
             respond_ok!(buf, "server: ok!").await;
@@ -134,31 +165,50 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
             seman.timer_kill(name);
             respond(buf, Response::Ok).await;
         }
-        Command::TimerList => {
+        Command::TimerList { json } => {
             let now = Instant::now();
-            let mut result = String::new();
-            
-            for (i, timer) in seman
-                .iter_timers()
-                .sorted_by(|a, b| {
-                    a.deadline
-                        .cmp(&b.deadline)
-                        .then_with(|| a.name.cmp(&b.name))
-                })
-                .enumerate()
-            {
-                let remaining = timer.deadline.saturating_duration_since(now);
-                let empty_string = String::new();
-                let cmd = timer.cmd.as_ref().unwrap_or(&empty_string);
-                result.push_str(
-                    format!(
-                        "[{i}] =>\n\tname: {}\n\tcmd: {}\n\ttime: {:?}\n",
-                        timer.name, cmd, remaining
-                    )
-                    .as_str(),
-                );
+            if json {
+                let infos: Vec<TimerInfo> = seman
+                    .iter_timers()
+                    .sorted_by(|a, b| {
+                        a.deadline
+                            .cmp(&b.deadline)
+                            .then_with(|| a.name.cmp(&b.name))
+                    })
+                    .map(|t| TimerInfo {
+                        name: t.name.clone(),
+                        command: t.cmd.clone(),
+                        remaining_seconds: t.deadline.saturating_duration_since(now).as_secs_f64(),
+                    })
+                    .collect();
+                match serde_json::to_string(&infos) {
+                    Ok(s) => respond_ok!(buf, "{}", s).await,
+                    Err(e) => respond_err!(buf, "failed to serialize timer list: {e}").await,
+                }
+            } else {
+                let mut result = String::new();
+                for (i, timer) in seman
+                    .iter_timers()
+                    .sorted_by(|a, b| {
+                        a.deadline
+                            .cmp(&b.deadline)
+                            .then_with(|| a.name.cmp(&b.name))
+                    })
+                    .enumerate()
+                {
+                    let remaining = timer.deadline.saturating_duration_since(now);
+                    let empty_string = String::new();
+                    let cmd = timer.cmd.as_ref().unwrap_or(&empty_string);
+                    result.push_str(
+                        format!(
+                            "[{i}] =>\n\tname: {}\n\tcmd: {}\n\ttime: {:?}\n",
+                            timer.name, cmd, remaining
+                        )
+                        .as_str(),
+                    );
+                }
+                respond_ok!(buf, "{}", result).await;
             }
-            respond_ok!(buf, "{}", result).await;
         }
     }
 }

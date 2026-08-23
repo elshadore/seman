@@ -17,7 +17,7 @@ pub enum Command {
     ServiceStart { name: String },
     ServiceStop { name: String },
     #[command(visible_alias = "services")]
-    ServiceList,
+    ServiceList { #[arg(long)] json: bool },
     Timer {
         name: String,
         time: String,
@@ -25,7 +25,7 @@ pub enum Command {
         cmd: Option<String>
     },
     #[command(visible_alias = "timers")]
-    TimerList,
+    TimerList { #[arg(long)] json: bool },
     TimerKill { name: String },
     Exec { cmd: String },
     Ping,
