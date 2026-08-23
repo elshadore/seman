@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
     ServerStart,
-    ServerStartKill,
     ServerKill,
     ServerStatus,
     #[command(name  = "defservice-start")]
@@ -19,7 +18,12 @@ pub enum Command {
     ServiceStop { name: String },
     #[command(visible_alias = "services")]
     ServiceList,
-    Timer { name: String, time: String, cmd: String },
+    Timer {
+        name: String,
+        time: String,
+        #[arg[num_args = 0..=1]]
+        cmd: Option<String>
+    },
     #[command(visible_alias = "timers")]
     TimerList,
     TimerKill { name: String },

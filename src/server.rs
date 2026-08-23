@@ -31,6 +31,9 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
     }
 
     match cmd {
+        Command::ServerStart => {
+            client_respond(buf, "error: unknown command").await;
+        }
         Command::Ping => {
             client_respond(buf, "pong").await;
         }
@@ -119,18 +122,17 @@ async fn handle_command(state: SemanState, buf: &mut TokioUnixStream, cmd: Comma
                 .enumerate()
             {
                 let remaining = timer.deadline.saturating_duration_since(now);
+                let empty_string = String::new();
+                let cmd = timer.cmd.as_ref().unwrap_or(&empty_string);
                 result.push_str(
                     format!(
                         "[{i}] =>\n\tname: {}\n\tcmd: {}\n\ttime: {:?}\n",
-                        timer.name, timer.cmd, remaining
+                        timer.name, cmd, remaining
                     )
                     .as_str(),
                 );
             }
             client_respond(buf, result).await;
-        }
-        _ => {
-            client_respond(buf, "error: unknown command").await;
         }
     }
 }
@@ -195,7 +197,9 @@ pub fn start_daemon() -> Result<()> {
         .stderr(stderr)
         .start()
         .context("failed to start server daemon")?;
-
+    
+    println!("server-started!");
+    
     tokio::runtime::Runtime::new()
         .context("failed to initialize tokio runtime")?
         .block_on(server_loop())

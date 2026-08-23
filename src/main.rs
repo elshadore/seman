@@ -10,10 +10,6 @@ fn exec(cmd: Command) -> Result<()> {
         Command::ServerStatus => {
             seman::client::server_status()?;
         }
-        Command::ServerStartKill => {
-            seman::client::server_kill_if_running();
-            seman::client::server_command(Command::ServerStart)?;
-        }
         _ => {
             seman::client::server_command(cmd)?;
         }

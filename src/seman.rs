@@ -48,14 +48,14 @@ impl Service {
 
 pub struct Timer {
     pub name: String,
-    pub cmd: String,
+    pub cmd: Option<String>,
     pub duration: Duration,
     pub deadline: Instant,
     pub handle: JoinHandle<()>,
 }
 
 impl Timer {
-    pub fn new(name: String, cmd: String, duration: Duration, handle: JoinHandle<()>) -> Self {
+    pub fn new(name: String, cmd: Option<String>, duration: Duration, handle: JoinHandle<()>) -> Self {
         let deadline = Instant::now() + duration;
         Self {
             name,
@@ -122,11 +122,13 @@ impl Seman {
         self.services.iter()
     }
 
-    pub fn timer_add(&mut self, name: String, duration: Duration, cmd: String) {
+    pub fn timer_add(&mut self, name: String, duration: Duration, cmd: Option<String>) {
         let cmd1 = cmd.clone();
         let handle = tokio::spawn(async move {
             tokio::time::sleep(duration).await;
-            let _ = TokioCommand::new("sh").args(["-c", &cmd1]).output().await;
+            if let Some(cmd) = cmd1 {
+                let _ = TokioCommand::new("sh").args(["-c", &cmd]).output().await;
+            }
         });
         self.timers.push(Timer::new(name, cmd, duration, handle));
     }
