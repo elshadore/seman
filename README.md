@@ -1,11 +1,12 @@
 # SEMAN: SErvice MANager
-SEMAN is a simple linux service manager designed for usage with simple (tiling) window managers. It is designed for the management of simple desktop shell/binary programs such as listed below.
+SEMAN is a minimal linux service manager designed for the management of simple shell/binary programs often used with tiling window managers (such as the types listed below).
 
+- (Menu) Bars
 - Notification Managers
 - Compositiors
 - Keyboard Daemons.
 
-SEMAN allows you to define, start, restart and kill these processes to make simple linux desktops easier to work on. SEMAN also contains a simple timer system for executing shell programs, this can also be used to linux desktop related stuff as well.
+SEMAN allows you to define, start, restart and kill these processes making minimal linux setups easier to work on. SEMAN also contains a primitive timer system for executing shell programs.
 
 Here is an example of the shell interface.
 ```sh
@@ -68,7 +69,7 @@ Below is a listing of all SEMAN commands.
     Pong.
 
 ## Config File: `.semanrc`
-When initially starting the `seman server-start`, the `.semanrc` config file will be ran. This is interpretted as a list of SEMAN commands. SEMAN will attempt to find this file in the following locations. Server commands cannot be used this mode *obviously*.
+When initially starting the `seman server-start`, the `.semanrc` config file will be ran. This is interpretted as a list of SEMAN commands. Server commands cannot be used this mode *obviously*. SEMAN will attempt to find this file in the following locations.
 
 ```sh
 ## SEMANRC env variable
